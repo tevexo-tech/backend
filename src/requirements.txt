@@ -1,0 +1,5 @@
+Flask==2.2.2
+Flask-SQLAlchemy==2.5.1
+psycopg2-binary==2.9.6  # Updated psycopg2 to the latest compatible version
+python-dotenv==1.0.0  # Ensure compatibility with modern Flask setups
+Werkzeug==2.2.3  # Ensure compatibility with Flask 2.2.2
