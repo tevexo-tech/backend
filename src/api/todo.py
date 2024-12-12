@@ -55,7 +55,7 @@ def todo():
         return jsonify({"error": "An unexpected error occurred"}), 500
 
 
-@to_do.route('/get_todo_list', methods=['GET'])
+@to_do.route('/get_todo_lists', methods=['GET'])
 def get_todo():
     try:
         with byte_master_connection() as session:
