@@ -1,17 +1,28 @@
 import hashlib
+
+import jwt
 from flask import Blueprint, request, jsonify
-from datetime import datetime
+import datetime
 from src.db.db_connection import byte_master_connection
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.sql import text
 import logging
+import uuid
+from src.config.constants import JWT_SECRET_KEY
 
+
+
+
+JWT_SECRET_KEY=JWT_SECRET_KEY
 logger = logging.getLogger(__name__)
 
 auth_blueprint = Blueprint('auth', __name__)
 def md5_hash_password(password: str) -> str:
     """Helper function to hash the password using MD5."""
     return hashlib.md5(password.encode('utf-8')).hexdigest()
+
+
+candidate_id = str(uuid.uuid4())  # Generate a unique UUID
 @auth_blueprint.route('/signup', methods=['POST'])
 def signup():
     try:
@@ -28,7 +39,7 @@ def signup():
         logger.debug(f"Checking if user {username} or email {email} already exists")
 
         with byte_master_connection() as session:
-            query = text("SELECT * FROM users WHERE username = :username OR email = :email")
+            query = text("SELECT * FROM candidates WHERE username = :username OR email = :email")
             existing_user = session.execute(query, {'username': username, 'email': email}).fetchone()
 
             if existing_user:
@@ -36,17 +47,20 @@ def signup():
                 return jsonify({"message": "Username or email already exists"}), 400
 
             hashed_password = md5_hash_password(password)
+            candidate_id = str(uuid.uuid4())  # Generate a UUID for candidate_id
+
             insert_query = text(
-                "INSERT INTO users (username, email, password_hash, created_at, updated_at) "
-                "VALUES (:username, :email, :password_hash, :created_at, :updated_at)"
+                "INSERT INTO candidates (username, email, password_hash, candidate_id, created_at, updated_at) "
+                "VALUES (:username, :email, :password_hash, :candidate_id, :created_at, :updated_at)"
             )
 
             session.execute(insert_query, {
                 'username': username,
                 'email': email,
                 'password_hash': hashed_password,
-                'created_at': datetime.now(),
-                'updated_at': datetime.now()
+                'candidate_id': candidate_id,
+                'created_at': datetime.datetime.now(),
+                'updated_at': datetime.datetime.now()
             })
             session.commit()
 
@@ -57,8 +71,9 @@ def signup():
             "user": {
                 "username": username,
                 "email": email,
-                "created_at": datetime.now().isoformat(),
-                "updated_at": datetime.now().isoformat()
+                "candidate_id": candidate_id,
+                "created_at": datetime.datetime.now(),
+                "updated_at":datetime.datetime.now()
             }
         }), 201
 
@@ -74,7 +89,6 @@ def signup():
 @auth_blueprint.route('/login', methods=['POST'])
 def login():
     try:
-
         data = request.get_json()
 
         if not data or not data.get('email') or not data.get('password'):
@@ -87,7 +101,7 @@ def login():
         logger.debug(f"Checking if user with email {email} exists")
 
         with byte_master_connection() as session:
-            query = text("SELECT * FROM users WHERE email = :email")
+            query = text("SELECT * FROM candidates WHERE email = :email")
             user = session.execute(query, {'email': email}).fetchone()
 
             if not user:
@@ -100,6 +114,15 @@ def login():
 
         logger.debug(f"User with email {email} logged in successfully")
 
+        # Generate JWT token
+        payload = {
+            'sub': email,  # Subject (usually user identifier)
+            'iat': datetime.datetime.utcnow(),  # Issued at time
+            'exp': datetime.datetime.utcnow() + datetime.timedelta(hours=1)  # Expiration time (1 hour)
+        }
+
+        token = jwt.encode(payload, JWT_SECRET_KEY, algorithm='HS256')
+
         return jsonify({
             "message": "Login successful",
             "user": {
@@ -107,15 +130,14 @@ def login():
                 "username": user[1],
                 "created_at": user[4],
                 "updated_at": user[5]
-            }
+            },
+            "token": token  # Return the JWT token
         }), 200
 
     except SQLAlchemyError as e:
-
         logger.error(f"Error occurred while interacting with the database: {str(e)}")
         return jsonify({"message": "An error occurred while logging in"}), 500
 
     except Exception as e:
-
         logger.error(f"Unexpected error: {str(e)}")
         return jsonify({"message": "An unexpected error occurred"}), 500

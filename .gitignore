@@ -4,7 +4,7 @@ __pycache__/
 
 # Virtual environments
 venv/
-src/.env
+
 
 # PyCharm settings
 .idea/
@@ -19,3 +19,5 @@ Thumbs.db
 # Test coverage
 .coverage
 htmlcov/
+src/.env
+
