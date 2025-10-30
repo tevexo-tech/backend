@@ -4,20 +4,44 @@ __pycache__/
 
 # Virtual environments
 venv/
+.venv/
 
+# Environment variables
+.env
+src/.env
 
-# PyCharm settings
+# PyCharm / VS Code settings
 .idea/
+.vscode/
 
 # Logs
 *.log
+logs/
 
 # OS-specific files
 .DS_Store
 Thumbs.db
 
-# Test coverage
+# Test and coverage reports
 .coverage
 htmlcov/
-src/.env
+.tox/
+pytest_cache/
 
+# Build artifacts
+build/
+dist/
+*.egg-info/
+
+# Temporary files
+*.tmp
+*.bak
+*.swp
+
+# Cache folders
+__pycache__/
+.cache/
+
+# Local database / uploads (if any)
+instance/
+uploads/

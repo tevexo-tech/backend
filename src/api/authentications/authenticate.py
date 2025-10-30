@@ -1,143 +1,147 @@
 import hashlib
-
 import jwt
-from flask import Blueprint, request, jsonify
 import datetime
-from src.db.db_connection import byte_master_connection
-from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy.sql import text
-import logging
 import uuid
+import logging
+from flask import request
+from flask_restful import Resource
+from sqlalchemy.sql import text
+from sqlalchemy.exc import SQLAlchemyError
+from src.db.db_connection import byte_master_connection
 from src.config.constants import JWT_SECRET_KEY
+import re
 
-
-
-
-JWT_SECRET_KEY=JWT_SECRET_KEY
 logger = logging.getLogger(__name__)
 
-auth_blueprint = Blueprint('auth', __name__)
 def md5_hash_password(password: str) -> str:
-    """Helper function to hash the password using MD5."""
     return hashlib.md5(password.encode('utf-8')).hexdigest()
+def is_strong_password(password: str) -> bool:
+    """
+    Validate password strength.
+    - At least 8 characters
+    - Contains uppercase, lowercase, number, and special character
+    """
+    if len(password) < 8:
+        return False
+    if not re.search(r"[A-Z]", password):
+        return False
+    if not re.search(r"[a-z]", password):
+        return False
+    if not re.search(r"[0-9]", password):
+        return False
+    if not re.search(r"[!@#$%^&*(),.?\":{}|<>]", password):
+        return False
+    return True
+
+class SignupAPI(Resource):
+    def post(self):
+        try:
+            data = request.get_json()
+            if not data or not data.get("username") or not data.get("email") or not data.get("password"):
+                return {"message": "Username, email, and password are required"}, 400
+
+            username = data["username"]
+            email = data["email"]
+            password = data["password"]
+
+            # ✅ Password strength check
+            if not is_strong_password(password):
+                return {
+                    "message": (
+                        "Password must be at least 8 characters long, "
+                        "and include an uppercase letter, lowercase letter, "
+                        "a number, and a special character."
+                    )
+                }, 400
+
+            with byte_master_connection() as session:
+                existing_user = session.execute(
+                    text("SELECT * FROM candidates WHERE username = :username OR email = :email"),
+                    {"username": username, "email": email}
+                ).fetchone()
+
+                if existing_user:
+                    return {"message": "Username or email already exists"}, 400
+
+                hashed_password = md5_hash_password(password)
+                candidate_id = str(uuid.uuid4())
+
+                session.execute(
+                    text("""
+                        INSERT INTO candidates (username, email, password, candidate_id, created_at, updated_at)
+                        VALUES (:username, :email, :password, :candidate_id, :created_at, :updated_at)
+                    """),
+                    {
+                        "username": username,
+                        "email": email,
+                        "password": hashed_password,
+                        "candidate_id": candidate_id,
+                        "created_at": datetime.datetime.now(),
+                        "updated_at": datetime.datetime.now()
+                    }
+                )
+                session.commit()
+
+            return {
+                "message": "User created successfully",
+                "user": {"username": username, "email": email, "candidate_id": candidate_id}
+            }, 201
+
+        except SQLAlchemyError as e:
+            logger.error(f"Database error: {str(e)}")
+            return {"message": "Database error occurred"}, 500
+
+        except Exception as e:
+            logger.error(f"Unexpected error: {str(e)}")
+            return {"message": "Unexpected error occurred"}, 500
 
 
-candidate_id = str(uuid.uuid4())  # Generate a unique UUID
-@auth_blueprint.route('/signup', methods=['POST'])
-def signup():
-    try:
-        data = request.get_json()
 
-        if not data or not data.get('username') or not data.get('password') or not data.get('email'):
-            logger.error("Missing username, email, or password in request data")
-            return jsonify({"message": "Username, email, and password are required"}), 400
+class LoginAPI(Resource):
+    def post(self):
+        try:
+            data = request.get_json()
+            if not data or not data.get("email") or not data.get("password"):
+                return {"message": "Email and password are required"}, 400
 
-        username = data['username']
-        password = data['password']
-        email = data['email']
+            email = data["email"]
+            password = data["password"]
 
-        logger.debug(f"Checking if user {username} or email {email} already exists")
+            with byte_master_connection() as session:
+                user = session.execute(
+                    text("SELECT * FROM candidates WHERE email = :email"),
+                    {"email": email}
+                ).fetchone()
 
-        with byte_master_connection() as session:
-            query = text("SELECT * FROM candidates WHERE username = :username OR email = :email")
-            existing_user = session.execute(query, {'username': username, 'email': email}).fetchone()
+                if not user:
+                    return {"message": "Invalid email or password"}, 401
 
-            if existing_user:
-                logger.error(f"User with username {username} or email {email} already exists in the database")
-                return jsonify({"message": "Username or email already exists"}), 400
+                if md5_hash_password(password) != user[3]:
+                    return {"message": "Invalid email or password"}, 401
 
-            hashed_password = md5_hash_password(password)
-            candidate_id = str(uuid.uuid4())  # Generate a UUID for candidate_id
-
-            insert_query = text(
-                "INSERT INTO candidates (username, email, password_hash, candidate_id, created_at, updated_at) "
-                "VALUES (:username, :email, :password_hash, :candidate_id, :created_at, :updated_at)"
-            )
-
-            session.execute(insert_query, {
-                'username': username,
-                'email': email,
-                'password_hash': hashed_password,
-                'candidate_id': candidate_id,
-                'created_at': datetime.datetime.now(),
-                'updated_at': datetime.datetime.now()
-            })
-            session.commit()
-
-        logger.debug(f"User {username} created successfully")
-
-        return jsonify({
-            "message": "User created successfully",
-            "user": {
-                "username": username,
-                "email": email,
-                "candidate_id": candidate_id,
-                "created_at": datetime.datetime.now(),
-                "updated_at":datetime.datetime.now()
+            payload = {
+                "sub": email,
+                "iat": datetime.datetime.utcnow(),
+                "exp": datetime.datetime.utcnow() + datetime.timedelta(hours=1)
             }
-        }), 201
 
-    except SQLAlchemyError as e:
-        logger.error(f"Error occurred while interacting with the database: {str(e)}")
-        return jsonify({"message": "An error occurred while creating the user"}), 500
+            token = jwt.encode(payload, JWT_SECRET_KEY, algorithm="HS256")
 
-    except Exception as e:
-        logger.error(f"Unexpected error: {str(e)}")
-        return jsonify({"message": "An unexpected error occurred"}), 500
+            return {
+                "message": "Login successful",
+                "user": {
+                    "email": email,
+                    "username": user[1],
+                    "created_at": str(user[4]),
+                    "updated_at": str(user[5])
+                },
+                "token": token
+            }, 200
 
+        except SQLAlchemyError as e:
+            logger.error(f"Database error: {str(e)}")
+            return {"message": "Database error occurred"}, 500
 
-@auth_blueprint.route('/login', methods=['POST'])
-def login():
-    try:
-        data = request.get_json()
-
-        if not data or not data.get('email') or not data.get('password'):
-            logger.error("Missing email or password in request data")
-            return jsonify({"message": "Email and password are required"}), 400
-
-        email = data['email']
-        password = data['password']
-
-        logger.debug(f"Checking if user with email {email} exists")
-
-        with byte_master_connection() as session:
-            query = text("SELECT * FROM candidates WHERE email = :email")
-            user = session.execute(query, {'email': email}).fetchone()
-
-            if not user:
-                logger.error(f"User with email {email} does not exist")
-                return jsonify({"message": "Invalid email or password"}), 401
-
-            if md5_hash_password(password) != user[3]:
-                logger.error(f"Incorrect password for email {email}")
-                return jsonify({"message": "Invalid email or password"}), 401
-
-        logger.debug(f"User with email {email} logged in successfully")
-
-        # Generate JWT token
-        payload = {
-            'sub': email,  # Subject (usually user identifier)
-            'iat': datetime.datetime.utcnow(),  # Issued at time
-            'exp': datetime.datetime.utcnow() + datetime.timedelta(hours=1)  # Expiration time (1 hour)
-        }
-
-        token = jwt.encode(payload, JWT_SECRET_KEY, algorithm='HS256')
-
-        return jsonify({
-            "message": "Login successful",
-            "user": {
-                "email": email,
-                "username": user[1],
-                "created_at": user[4],
-                "updated_at": user[5]
-            },
-            "token": token  # Return the JWT token
-        }), 200
-
-    except SQLAlchemyError as e:
-        logger.error(f"Error occurred while interacting with the database: {str(e)}")
-        return jsonify({"message": "An error occurred while logging in"}), 500
-
-    except Exception as e:
-        logger.error(f"Unexpected error: {str(e)}")
-        return jsonify({"message": "An unexpected error occurred"}), 500
+        except Exception as e:
+            logger.error(f"Unexpected error: {str(e)}")
+            return {"message": "Unexpected error occurred"}, 500

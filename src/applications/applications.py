@@ -1,16 +1,12 @@
-# application.py
-from flask import Flask
+# src/applications/applications.py
 from flask_cors import CORS
 
-app = Flask(__name__)
-
 def register_blueprint(app):
+    # Enable CORS globally (once)
     CORS(app, resources={r"/*": {"origins": "*"}})
-    from src.api.authentications.authenticate import auth_blueprint
-    from src.api.todo import to_do
 
-    app.register_blueprint(auth_blueprint)
-    app.register_blueprint(to_do)
+    # Import the single routes blueprint and register it
+    from routes import api_blueprint
+
+    app.register_blueprint(api_blueprint)
     return app
-
-
